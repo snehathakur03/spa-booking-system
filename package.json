@@ -1,0 +1,31 @@
+{
+  "name": "spa-booking-system",
+  "version": "1.0.0",
+  "private": true,
+  "dependencies": {
+    "react": "^18.3.1",
+    "react-dom": "^18.3.1",
+    "react-scripts": "5.0.1",
+    "axios": "^1.6.7",
+    "zustand": "^4.5.2",
+    "@tanstack/react-query": "^5.28.0",
+    "@dnd-kit/core": "^6.1.0",
+    "@dnd-kit/utilities": "^3.2.2",
+    "react-window": "^1.8.10",
+    "date-fns": "^3.3.1",
+    "react-hot-toast": "^2.4.1",
+    "immer": "^10.0.4"
+  },
+  "scripts": {
+    "start": "react-scripts start",
+    "build": "react-scripts build",
+    "test": "react-scripts test"
+  },
+  "eslintConfig": {
+    "extends": ["react-app"]
+  },
+  "browserslist": {
+    "production": [">0.2%", "not dead", "not op_mini all"],
+    "development": ["last 1 chrome version", "last 1 firefox version", "last 1 safari version"]
+  }
+}

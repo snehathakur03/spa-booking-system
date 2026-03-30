@@ -1,0 +1,1118 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8"/>
+<meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+<title>NatureLand Spa Booking System</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+<script src="https://unpkg.com/react@18/umd/react.development.js"></script>
+<script src="https://unpkg.com/react-dom@18/umd/react-dom.development.js"></script>
+<script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+<script src="https://unpkg.com/axios/dist/axios.min.js"></script>
+<style>
+*,*::before,*::after{box-sizing:border-box;margin:0;padding:0}
+html,body,#root{height:100%;width:100%}
+body{font-family:'Inter',system-ui,sans-serif;background:#080816;color:#e2e8f0;-webkit-font-smoothing:antialiased}
+::-webkit-scrollbar{width:5px;height:5px}
+::-webkit-scrollbar-track{background:rgba(255,255,255,0.02)}
+::-webkit-scrollbar-thumb{background:rgba(255,255,255,0.12);border-radius:3px}
+select option{background:#1a1a2e;color:#e2e8f0}
+input[type=date]::-webkit-calendar-picker-indicator,
+input[type=datetime-local]::-webkit-calendar-picker-indicator{filter:invert(1) opacity(0.4);cursor:pointer}
+@keyframes spin{to{transform:rotate(360deg)}}
+@keyframes slideIn{from{transform:translateX(100%)}to{transform:translateX(0)}}
+@keyframes fadeIn{from{opacity:0;transform:translateY(-4px)}to{opacity:1;transform:translateY(0)}}
+@keyframes modalIn{from{opacity:0;transform:translate(-50%,-52%)}to{opacity:1;transform:translate(-50%,-50%)}}
+@keyframes toast{0%{opacity:0;transform:translateX(120%)}10%{opacity:1;transform:translateX(0)}85%{opacity:1;transform:translateX(0)}100%{opacity:0;transform:translateX(120%)}}
+.toast{animation:toast 3s ease forwards}
+</style>
+</head>
+<body>
+<div id="root"></div>
+<script type="text/babel">
+const { useState, useEffect, useCallback, useMemo, useRef, memo, createContext, useContext, useReducer } = React;
+
+// ═══════════════════════════════════════════════════════
+// CONSTANTS & UTILS
+// ═══════════════════════════════════════════════════════
+const BASE_URL = 'https://dev.natureland.hipster-virtual.com/api/v1';
+const SLOT_H = 64;      // px per hour
+const COL_W  = 152;     // therapist column width
+const TIME_W = 60;      // time axis width
+const HDR_H  = 60;      // header height
+const DAY_START = 8;
+const DAY_END   = 22;
+
+const STATUS = {
+  confirmed:  { bg:'#3B82F6', label:'Confirmed'  },
+  checkin:    { bg:'#EC4899', label:'Check-in'   },
+  inprogress: { bg:'#EC4899', label:'In Progress'},
+  cancelled:  { bg:'#6B7280', label:'Cancelled'  },
+  completed:  { bg:'#10B981', label:'Completed'  },
+  pending:    { bg:'#F59E0B', label:'Pending'    },
+};
+const statusStyle = (s) => STATUS[(s||'').toLowerCase().replace(/[\s\-_]/g,'')] || STATUS.confirmed;
+const therapistColor = (g) => (g||'').toLowerCase().startsWith('f') ? '#EC4899' : '#3B82F6';
+
+const fmt = (d, f='HH:mm') => {
+  if(!d) return '—';
+  const dt = new Date(d);
+  if(f==='HH:mm') return `${String(dt.getHours()).padStart(2,'0')}:${String(dt.getMinutes()).padStart(2,'0')}`;
+  if(f==='dd MMM') return dt.toLocaleDateString('en-GB',{day:'2-digit',month:'short'});
+  if(f==='full') return dt.toLocaleDateString('en-GB',{day:'2-digit',month:'short',year:'numeric'})+' '+fmt(d,'HH:mm');
+  return dt.toISOString().split('T')[0];
+};
+const toISO = (d) => new Date(d).toISOString();
+const addMins = (d, m) => new Date(new Date(d).getTime() + m*60000).toISOString();
+const diffMins = (a, b) => (new Date(b)-new Date(a))/60000;
+const topPx  = (t) => { const m=new Date(t).getHours()*60+new Date(t).getMinutes()-DAY_START*60; return (m/60)*SLOT_H; };
+const hPx    = (s,e) => Math.max(((diffMins(s,e)||60)/60)*SLOT_H, 26);
+const snap   = (mins) => Math.round(mins/15)*15;
+const today  = () => new Date().toISOString().split('T')[0];
+
+// ═══════════════════════════════════════════════════════
+// LOGGER
+// ═══════════════════════════════════════════════════════
+const log = {
+  api:    (m,...a) => console.log(`%c[API] ${m}`,'color:#a78bfa;font-weight:600',...a),
+  action: (m,...a) => console.log(`%c[ACTION] ${m}`,'color:#34d399;font-weight:600',...a),
+  error:  (m,...a) => console.error(`%c[ERROR] ${m}`,'color:#f87171;font-weight:600',...a),
+  info:   (m,...a) => console.log(`%c[INFO] ${m}`,'color:#60a5fa',...a),
+};
+
+// ═══════════════════════════════════════════════════════
+// MOCK DATA
+// ═══════════════════════════════════════════════════════
+const SERVICES = [
+  {id:1,name:'Swedish Massage',duration:60,price:80},
+  {id:2,name:'Deep Tissue',duration:90,price:110},
+  {id:3,name:'Hot Stone',duration:75,price:95},
+  {id:4,name:'Aromatherapy',duration:60,price:85},
+  {id:5,name:'Facial',duration:45,price:70},
+  {id:6,name:'Body Scrub',duration:60,price:75},
+  {id:7,name:'Reflexology',duration:45,price:65},
+  {id:8,name:'Thai Massage',duration:90,price:100},
+];
+const ROOMS = Array.from({length:15},(_,i)=>({id:i+1,name:`Room ${i+1}`}));
+const FN_F=['Lily','Emma','Sophia','Olivia','Ava','Isabella','Mia','Luna','Grace','Zoe','Nina','Aria','Chloe','Maya','Nora'];
+const FN_M=['James','Liam','Noah','Oliver','Lucas','Ethan','Aiden','Logan','Ryan','Mason','Caleb','Owen','Dylan','Evan','Ian'];
+const LAST=['Smith','Johnson','Williams','Brown','Jones','Garcia','Miller','Davis','Chen','Patel','Kim','Lee','Park','Nguyen','Torres'];
+const REQ_TYPES=['Standard','VIP','Couple','Corporate'];
+const rng=(n)=>Math.floor(Math.random()*n);
+const pick=(a)=>a[rng(a.length)];
+
+const genTherapists = (n=25) => Array.from({length:n},(_,i)=>{
+  const g=i%2===0?'female':'male';
+  const fn=g==='female'?FN_F[i%FN_F.length]:FN_M[i%FN_M.length];
+  const ln=LAST[rng(LAST.length)];
+  return {id:i+1,name:`${fn} ${ln}`,firstName:fn,lastName:ln,gender:g,room:ROOMS[i%ROOMS.length]};
+});
+
+const genBookings = (therapists, date, n=200) => {
+  const out=[];
+  const base=new Date(date+'T00:00:00');
+  const STATUSES=['confirmed','confirmed','confirmed','checkin','inprogress','cancelled','completed'];
+  for(let i=0;i<n;i++){
+    const t=therapists[rng(therapists.length)];
+    const svc=pick(SERVICES);
+    const h=DAY_START+rng(DAY_END-DAY_START-2);
+    const m=pick([0,15,30,45]);
+    const start=new Date(base.getTime()+(h*60+m)*60000).toISOString();
+    const end=addMins(start,svc.duration);
+    const cfn=pick(['Alice','Bob','Carol','Dan','Eva','Frank','Gina','Harry','Iris','Jack','Karen','Leo']);
+    const cln=pick(LAST);
+    out.push({
+      id:1000+i,
+      booking_ref:`BK${String(10000+i).padStart(5,'0')}`,
+      therapist_id:t.id, therapist:t,
+      client:{id:500+i,name:`${cfn} ${cln}`,phone:`+1${(rng(9e9)+1e9)}`},
+      service:svc, service_id:svc.id,
+      room:t.room, room_id:t.room.id,
+      start_time:start, end_time:end,
+      status:pick(STATUSES),
+      notes:rng(4)===0?'Sensitive skin – use hypoallergenic oils.':'',
+      request_type:pick(REQ_TYPES),
+    });
+  }
+  return out;
+};
+
+// ═══════════════════════════════════════════════════════
+// API CLIENT
+// ═══════════════════════════════════════════════════════
+const api = axios.create({baseURL:BASE_URL, timeout:12000});
+api.interceptors.request.use(cfg=>{
+  const t=localStorage.getItem('spa_token');
+  if(t) cfg.headers.Authorization=`Bearer ${t}`;
+  log.api(cfg.method?.toUpperCase(), cfg.url);
+  return cfg;
+});
+api.interceptors.response.use(r=>r, err=>{
+  const msg=err.response?.data?.message||err.message||'Unknown error';
+  log.error('API', {status:err.response?.status, msg, url:err.config?.url});
+  if(err.response?.status===401){ localStorage.removeItem('spa_token'); window.location.reload(); }
+  return Promise.reject({status:err.response?.status, message:msg, isTimeout:err.code==='ECONNABORTED'});
+});
+
+const API = {
+  login:   (e,p,k)=>api.post('/login',{email:e,password:p,key_pass:k}),
+  bookings:(p={})=>api.get('/bookings',{params:p}),
+  create:  (d)=>api.post('/bookings/create',d),
+  update:  (id,d)=>api.put(`/bookings/${id}`,d),
+  cancel:  (d)=>api.post('/bookings/item/cancel',d),
+  destroy: (id)=>api.delete(`/bookings/destroy/${id}`),
+  therapists:(p={})=>api.get('/therapists',{params:p}),
+  services: ()=>api.get('/services'),
+  rooms:    ()=>api.get('/rooms'),
+};
+
+// ═══════════════════════════════════════════════════════
+// GLOBAL STATE (simple context + reducer)
+// ═══════════════════════════════════════════════════════
+const Ctx = createContext(null);
+const initialState = {
+  token: localStorage.getItem('spa_token'),
+  user:  null,
+  therapists:[],
+  bookings:[],
+  bookingsMap:{},
+  services: SERVICES,
+  rooms: ROOMS,
+  selectedDate: today(),
+  selectedBookingId: null,
+  panelOpen: false,
+  panelMode: 'view',
+  createOpen: false,
+  search: '',
+  statusFilter: 'all',
+  loading: false,
+  toasts: [],
+};
+
+function reducer(state, action){
+  switch(action.type){
+    case 'SET_AUTH':
+      return {...state, token:action.token, user:action.user};
+    case 'LOGOUT':
+      return {...state, token:null, user:null};
+    case 'SET_THERAPISTS':
+      return {...state, therapists:action.data};
+    case 'SET_BOOKINGS':{
+      const map={};
+      action.data.forEach(b=>{map[b.id]=b;});
+      return {...state, bookings:action.data, bookingsMap:map};
+    }
+    case 'ADD_BOOKING':{
+      const b=action.booking;
+      return {...state, bookings:[...state.bookings, b], bookingsMap:{...state.bookingsMap,[b.id]:b}};
+    }
+    case 'UPDATE_BOOKING':{
+      const {id, data}=action;
+      const idx=state.bookings.findIndex(b=>b.id===id);
+      if(idx===-1) return state;
+      const updated={...state.bookings[idx],...data};
+      const newBookings=[...state.bookings];
+      newBookings[idx]=updated;
+      return {...state, bookings:newBookings, bookingsMap:{...state.bookingsMap,[id]:updated}};
+    }
+    case 'REMOVE_BOOKING':{
+      const m={...state.bookingsMap}; delete m[action.id];
+      return {...state, bookings:state.bookings.filter(b=>b.id!==action.id), bookingsMap:m};
+    }
+    case 'SET_LOADING':   return {...state, loading:action.val};
+    case 'SET_DATE':      return {...state, selectedDate:action.date};
+    case 'SET_SEARCH':    return {...state, search:action.val};
+    case 'SET_STATUS_F':  return {...state, statusFilter:action.val};
+    case 'OPEN_PANEL':    return {...state, panelOpen:true, panelMode:action.mode||'view', selectedBookingId:action.id||null};
+    case 'CLOSE_PANEL':   return {...state, panelOpen:false, selectedBookingId:null};
+    case 'OPEN_CREATE':   return {...state, createOpen:true};
+    case 'CLOSE_CREATE':  return {...state, createOpen:false};
+    case 'SELECT_BOOKING':return {...state, selectedBookingId:action.id};
+    case 'ADD_TOAST':     return {...state, toasts:[...state.toasts,{id:Date.now(),...action.toast}]};
+    case 'REMOVE_TOAST':  return {...state, toasts:state.toasts.filter(t=>t.id!==action.id)};
+    default: return state;
+  }
+}
+
+const useStore = () => useContext(Ctx);
+
+// ═══════════════════════════════════════════════════════
+// TOAST SYSTEM
+// ═══════════════════════════════════════════════════════
+const ToastContainer = () => {
+  const {state, dispatch} = useStore();
+  useEffect(()=>{
+    state.toasts.forEach(t=>{
+      const timer=setTimeout(()=>dispatch({type:'REMOVE_TOAST',id:t.id}), 2800);
+      return ()=>clearTimeout(timer);
+    });
+  },[state.toasts]);
+  return (
+    <div style={{position:'fixed',top:16,right:16,zIndex:9999,display:'flex',flexDirection:'column',gap:8,pointerEvents:'none'}}>
+      {state.toasts.map(t=>(
+        <div key={t.id} className="toast" style={{
+          background: t.type==='error'?'#1f0e0e':'#0f1a14',
+          border:`1px solid ${t.type==='error'?'rgba(239,68,68,0.4)':'rgba(16,185,129,0.4)'}`,
+          color: t.type==='error'?'#fca5a5':'#6ee7b7',
+          padding:'10px 16px', borderRadius:10, fontSize:13, fontWeight:500,
+          boxShadow:'0 4px 20px rgba(0,0,0,0.5)', minWidth:220, pointerEvents:'all',
+        }}>
+          {t.type==='error'?'✕ ':'✓ '}{t.msg}
+        </div>
+      ))}
+    </div>
+  );
+};
+
+// ═══════════════════════════════════════════════════════
+// UI PRIMITIVES
+// ═══════════════════════════════════════════════════════
+const Btn = ({children, onClick, variant='primary', disabled, style:s={}}) => {
+  const variants = {
+    primary:  {background:'linear-gradient(135deg,#7c6aff,#6356e8)',color:'#fff',boxShadow:'0 4px 12px rgba(124,106,255,0.35)'},
+    pink:     {background:'#EC4899',color:'#fff'},
+    ghost:    {background:'rgba(255,255,255,0.07)',color:'#94a3b8'},
+    danger:   {background:'rgba(239,68,68,0.15)',color:'#ef4444',border:'1px solid rgba(239,68,68,0.3)'},
+    green:    {background:'rgba(16,185,129,0.2)',color:'#10B981'},
+  };
+  return (
+    <button disabled={disabled} onClick={onClick} style={{
+      padding:'9px 18px', border:'none', borderRadius:9, fontWeight:700,
+      fontSize:13, cursor:disabled?'not-allowed':'pointer', opacity:disabled?.65:1,
+      transition:'opacity 0.15s,transform 0.1s', fontFamily:'inherit',
+      ...variants[variant], ...s,
+    }}
+    onMouseDown={e=>{if(!disabled) e.currentTarget.style.transform='scale(0.97)'}}
+    onMouseUp={e=>e.currentTarget.style.transform='scale(1)'}
+    >{children}</button>
+  );
+};
+
+const Input = ({label, value, onChange, type='text', placeholder, error, style:s={}}) => (
+  <div style={{marginBottom:14}}>
+    {label && <label style={{display:'block',fontSize:10,color:'rgba(255,255,255,0.4)',fontWeight:700,letterSpacing:1,textTransform:'uppercase',marginBottom:5}}>{label}</label>}
+    <input type={type} value={value} onChange={e=>onChange(e.target.value)} placeholder={placeholder}
+      style={{width:'100%',background:'rgba(255,255,255,0.05)',border:`1px solid ${error?'#ef4444':'rgba(255,255,255,0.1)'}`,
+        borderRadius:8,padding:'9px 12px',color:'#e2e8f0',fontSize:13,outline:'none',fontFamily:'inherit',colorScheme:'dark',...s}}/>
+    {error && <div style={{color:'#ef4444',fontSize:11,marginTop:3}}>{error}</div>}
+  </div>
+);
+
+const Select = ({label, value, onChange, options, error, style:s={}}) => (
+  <div style={{marginBottom:14}}>
+    {label && <label style={{display:'block',fontSize:10,color:'rgba(255,255,255,0.4)',fontWeight:700,letterSpacing:1,textTransform:'uppercase',marginBottom:5}}>{label}</label>}
+    <select value={value} onChange={e=>onChange(e.target.value)}
+      style={{width:'100%',background:'rgba(255,255,255,0.05)',border:`1px solid ${error?'#ef4444':'rgba(255,255,255,0.1)'}`,
+        borderRadius:8,padding:'9px 12px',color:'#e2e8f0',fontSize:13,outline:'none',cursor:'pointer',fontFamily:'inherit',...s}}>
+      {options.map(o=><option key={o.value} value={o.value}>{o.label}</option>)}
+    </select>
+    {error && <div style={{color:'#ef4444',fontSize:11,marginTop:3}}>{error}</div>}
+  </div>
+);
+
+const StatusBadge = ({status, size='md'}) => {
+  const s=statusStyle(status);
+  const sz={sm:{fontSize:9,padding:'2px 8px'},md:{fontSize:11,padding:'3px 10px'},lg:{fontSize:12,padding:'5px 14px'}};
+  return <span style={{display:'inline-flex',alignItems:'center',gap:4,background:s.bg,color:'#fff',fontWeight:700,borderRadius:20,letterSpacing:0.4,textTransform:'uppercase',...sz[size]}}>
+    <span style={{width:4,height:4,borderRadius:'50%',background:'rgba(255,255,255,0.6)'}}/>
+    {s.label}
+  </span>;
+};
+
+// ═══════════════════════════════════════════════════════
+// LOGIN PAGE
+// ═══════════════════════════════════════════════════════
+const LoginPage = () => {
+  const {dispatch} = useStore();
+  const [form, setForm] = useState({email:'react@hipster-inc.com', password:'React@123', key_pass:'07ba959153fe7eec778361bf42079439'});
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState('');
+  const set = k => v => setForm(p=>({...p,[k]:v}));
+
+  const handleLogin = async () => {
+    setLoading(true); setError('');
+    try {
+      const resp = await API.login(form.email, form.password, form.key_pass);
+      const d = resp.data?.data || resp.data;
+      const token = d?.token || d?.access_token || 'demo-token';
+      const user = d?.user || {name:'Staff User', email:form.email};
+      localStorage.setItem('spa_token', token);
+      dispatch({type:'SET_AUTH', token, user});
+      log.action('LOGIN', {email:form.email});
+    } catch(err) {
+      if(form.email==='react@hipster-inc.com' && form.password==='React@123'){
+        const demoToken = 'demo-'+Date.now();
+        localStorage.setItem('spa_token', demoToken);
+        dispatch({type:'SET_AUTH', token:demoToken, user:{name:'Demo Staff', email:form.email}});
+        log.action('LOGIN_DEMO');
+      } else {
+        setError(err.message || 'Invalid credentials');
+      }
+    } finally { setLoading(false); }
+  };
+
+  return (
+    <div style={{minHeight:'100vh',display:'flex',alignItems:'center',justifyContent:'center',
+      background:'radial-gradient(ellipse at 60% 40%,rgba(124,106,255,0.13) 0%,transparent 55%), radial-gradient(ellipse at 20% 70%,rgba(236,72,153,0.08) 0%,transparent 50%), #080816'}}>
+      <div style={{position:'fixed',inset:0,backgroundImage:'linear-gradient(rgba(255,255,255,0.02) 1px,transparent 1px),linear-gradient(90deg,rgba(255,255,255,0.02) 1px,transparent 1px)',backgroundSize:'48px 48px'}}/>
+      <div style={{position:'relative',width:400,padding:'40px',background:'rgba(15,15,30,0.92)',backdropFilter:'blur(20px)',border:'1px solid rgba(255,255,255,0.08)',borderRadius:20,boxShadow:'0 32px 80px rgba(0,0,0,0.6)'}}>
+        <div style={{textAlign:'center',marginBottom:32}}>
+          <div style={{width:56,height:56,borderRadius:16,background:'linear-gradient(135deg,#7c6aff,#EC4899)',display:'flex',alignItems:'center',justifyContent:'center',fontSize:26,margin:'0 auto 14px',boxShadow:'0 8px 24px rgba(124,106,255,0.4)'}}>✦</div>
+          <div style={{fontSize:24,fontWeight:800,color:'#f1f5f9',letterSpacing:-0.5}}>NatureLand</div>
+          <div style={{fontSize:13,color:'rgba(255,255,255,0.38)',marginTop:4}}>Spa &amp; Wellness Booking System</div>
+        </div>
+        <Input label="Email" value={form.email} onChange={set('email')} type="email"/>
+        <Input label="Password" value={form.password} onChange={set('password')} type="password"/>
+        <Input label="Key Pass" value={form.key_pass} onChange={set('key_pass')} style={{fontFamily:'monospace',fontSize:11,letterSpacing:0.5}}/>
+        {error && <div style={{background:'rgba(239,68,68,0.1)',border:'1px solid rgba(239,68,68,0.25)',borderRadius:8,padding:'10px 14px',color:'#fca5a5',fontSize:12,marginBottom:14}}>{error}</div>}
+        <Btn onClick={handleLogin} disabled={loading} style={{width:'100%',padding:'13px',fontSize:15,marginTop:4}}>
+          {loading ? 'Signing in…' : 'Sign In →'}
+        </Btn>
+        <div style={{marginTop:18,textAlign:'center',fontSize:11,color:'rgba(255,255,255,0.2)'}}>Credentials pre-filled · API + demo fallback</div>
+      </div>
+    </div>
+  );
+};
+
+// ═══════════════════════════════════════════════════════
+// BOOKING BLOCK (calendar card)
+// ═══════════════════════════════════════════════════════
+const BookingBlock = memo(({booking, onClick}) => {
+  const s = statusStyle(booking.status);
+  const top = topPx(booking.start_time);
+  const height = hPx(booking.start_time, booking.end_time);
+  const [drag, setDrag] = useState(false);
+  const dragRef = useRef({});
+
+  const onMouseDown = (e) => {
+    e.stopPropagation();
+    dragRef.current = {startY: e.clientY, startTop: top, moved: false};
+    setDrag(true);
+    const onMove = (me) => {
+      dragRef.current.moved = Math.abs(me.clientY - dragRef.current.startY) > 6;
+    };
+    const onUp = (me) => {
+      document.removeEventListener('mousemove', onMove);
+      document.removeEventListener('mouseup', onUp);
+      setDrag(false);
+      if(!dragRef.current.moved){ onClick(booking); return; }
+      const dy = me.clientY - dragRef.current.startY;
+      const dMins = snap((dy / SLOT_H) * 60);
+      if(dMins===0) return;
+      window._dndDrop && window._dndDrop(booking.id, dMins);
+    };
+    document.addEventListener('mousemove', onMove);
+    document.addEventListener('mouseup', onUp);
+  };
+
+  return (
+    <div onMouseDown={onMouseDown} style={{
+      position:'absolute', top, left:2, right:2, height,
+      background:s.bg, borderRadius:6, padding:'3px 6px',
+      cursor:'grab', opacity: drag?.0.5:1, overflow:'hidden', zIndex:2,
+      boxShadow:'0 1px 6px rgba(0,0,0,0.4)', borderLeft:'3px solid rgba(255,255,255,0.3)',
+      userSelect:'none', transition:'box-shadow 0.1s',
+    }}>
+      <div style={{fontSize:10,fontWeight:700,color:'#fff',lineHeight:1.2,whiteSpace:'nowrap',overflow:'hidden',textOverflow:'ellipsis'}}>{booking.client?.name}</div>
+      {height>36 && <div style={{fontSize:9,color:'rgba(255,255,255,0.8)',whiteSpace:'nowrap',overflow:'hidden'}}>{booking.service?.name}</div>}
+      {height>52 && <div style={{fontSize:9,color:'rgba(255,255,255,0.65)'}}>{fmt(booking.start_time)} – {fmt(booking.end_time)}</div>}
+    </div>
+  );
+});
+
+// ═══════════════════════════════════════════════════════
+// THERAPIST COLUMN
+// ═══════════════════════════════════════════════════════
+const TherapistColumn = memo(({therapist, bookings, onBookingClick, onDrop}) => {
+  const totalH = ((DAY_END - DAY_START)) * SLOT_H;
+  useEffect(()=>{
+    window._dndDrop = (bId, dMins) => onDrop(bId, dMins, therapist.id);
+  });
+  return (
+    <div style={{position:'relative',minWidth:COL_W,width:COL_W,height:totalH,borderRight:'1px solid rgba(255,255,255,0.05)',flexShrink:0}}>
+      {Array.from({length:DAY_END-DAY_START},(_,i)=>Array.from({length:4},(__,j)=>(
+        <div key={`${i}-${j}`} style={{position:'absolute',top:i*SLOT_H+j*(SLOT_H/4),left:0,right:0,height:1,background:j===0?'rgba(255,255,255,0.07)':'rgba(255,255,255,0.025)'}}/>
+      )))}
+      {bookings.map(b=><BookingBlock key={b.id} booking={b} onClick={onBookingClick}/>)}
+    </div>
+  );
+});
+
+// ═══════════════════════════════════════════════════════
+// NOW LINE
+// ═══════════════════════════════════════════════════════
+const NowLine = memo(({selectedDate}) => {
+  const [now, setNow] = useState(new Date());
+  useEffect(()=>{ const t=setInterval(()=>setNow(new Date()),60000); return()=>clearInterval(t); },[]);
+  const isToday = selectedDate === now.toISOString().split('T')[0];
+  if(!isToday) return null;
+  const mins = now.getHours()*60+now.getMinutes()-DAY_START*60;
+  if(mins<0||mins>((DAY_END-DAY_START)*60)) return null;
+  const top = (mins/60)*SLOT_H;
+  return (
+    <div style={{position:'absolute',top,left:0,right:0,zIndex:5,display:'flex',alignItems:'center',pointerEvents:'none'}}>
+      <div style={{width:8,height:8,borderRadius:'50%',background:'#ef4444',flexShrink:0,marginLeft:-4,boxShadow:'0 0 6px rgba(239,68,68,0.7)'}}/>
+      <div style={{flex:1,height:1.5,background:'rgba(239,68,68,0.5)'}}/>
+    </div>
+  );
+});
+
+// ═══════════════════════════════════════════════════════
+// CALENDAR GRID
+// ═══════════════════════════════════════════════════════
+const CalendarGrid = () => {
+  const {state, dispatch} = useStore();
+  const {therapists, selectedDate} = state;
+  const scrollRef = useRef(null);
+  const headerScrollRef = useRef(null);
+
+  const filtered = useMemo(()=>{
+    const {bookings, search, statusFilter, selectedDate:sd} = state;
+    return bookings.filter(b=>{
+      if(b.start_time?.split('T')[0] !== sd) return false;
+      if(statusFilter!=='all' && b.status!==statusFilter) return false;
+      if(search){
+        const q=search.toLowerCase();
+        return b.client?.name?.toLowerCase().includes(q)||b.booking_ref?.toLowerCase().includes(q)||b.therapist?.name?.toLowerCase().includes(q)||b.service?.name?.toLowerCase().includes(q);
+      }
+      return true;
+    });
+  },[state.bookings, state.search, state.statusFilter, state.selectedDate]);
+
+  const byTherapist = useMemo(()=>{
+    const m={};
+    therapists.forEach(t=>{m[t.id]=[];});
+    filtered.forEach(b=>{ if(m[b.therapist_id]) m[b.therapist_id].push(b); });
+    return m;
+  },[filtered, therapists]);
+
+  const handleBookingClick = useCallback(b=>{
+    dispatch({type:'SELECT_BOOKING', id:b.id});
+    dispatch({type:'OPEN_PANEL', mode:'view', id:b.id});
+    log.action('BOOKING_CLICKED', {id:b.id, ref:b.booking_ref});
+  },[dispatch]);
+
+  const handleDrop = useCallback((bookingId, dMins, newTherapistId) => {
+    const b = state.bookingsMap[bookingId];
+    if(!b) return;
+    const newStart = addMins(b.start_time, dMins);
+    const newEnd   = addMins(b.end_time, dMins);
+    const newT = therapists.find(t=>t.id===newTherapistId)||b.therapist;
+    dispatch({type:'UPDATE_BOOKING', id:bookingId, data:{start_time:newStart, end_time:newEnd, therapist_id:newTherapistId, therapist:newT}});
+    log.action('BOOKING_DND_RESCHEDULE', {id:bookingId, dMins, newTherapistId});
+    // Fire API silently
+    API.update(bookingId, {start_time:newStart, end_time:newEnd, therapist_id:newTherapistId}).catch(()=>{});
+    dispatch({type:'ADD_TOAST', toast:{type:'success', msg:`Booking rescheduled`}});
+  },[state.bookingsMap, therapists, dispatch]);
+
+  const syncScroll = (e) => {
+    if(headerScrollRef.current) headerScrollRef.current.scrollLeft = e.target.scrollLeft;
+  };
+
+  const totalH = (DAY_END-DAY_START)*SLOT_H;
+
+  return (
+    <div style={{display:'flex',flexDirection:'column',height:'100%',overflow:'hidden'}}>
+      {/* Sticky header */}
+      <div style={{display:'flex',flexShrink:0,borderBottom:'1px solid rgba(255,255,255,0.07)',background:'rgba(8,8,22,0.98)',zIndex:10}}>
+        <div style={{width:TIME_W,flexShrink:0,height:HDR_H}}/>
+        <div ref={headerScrollRef} style={{display:'flex',overflow:'hidden',flex:1}}>
+          {therapists.map(t=>{
+            const c=therapistColor(t.gender);
+            return (
+              <div key={t.id} style={{minWidth:COL_W,width:COL_W,height:HDR_H,display:'flex',flexDirection:'column',alignItems:'center',justifyContent:'center',borderRight:'1px solid rgba(255,255,255,0.05)',flexShrink:0,padding:'4px 2px',gap:2}}>
+                <div style={{width:30,height:30,borderRadius:'50%',background:c,display:'flex',alignItems:'center',justifyContent:'center',fontSize:11,fontWeight:800,color:'#fff',flexShrink:0}}>
+                  {t.firstName?.[0]}{t.lastName?.[0]}
+                </div>
+                <div style={{fontSize:9,color:'#e2e8f0',fontWeight:600,textAlign:'center',maxWidth:COL_W-8,overflow:'hidden',whiteSpace:'nowrap',textOverflow:'ellipsis'}}>{t.name}</div>
+                <div style={{fontSize:8,color:c,fontWeight:800,letterSpacing:0.5}}>{t.gender?.toUpperCase()?.[0]} · R{t.room?.id}</div>
+              </div>
+            );
+          })}
+        </div>
+      </div>
+
+      {/* Scrollable body */}
+      <div ref={scrollRef} style={{flex:1,display:'flex',overflow:'auto'}} onScroll={syncScroll}>
+        {/* Time axis */}
+        <div style={{width:TIME_W,flexShrink:0,position:'relative',height:totalH}}>
+          {Array.from({length:DAY_END-DAY_START},(_,i)=>(
+            <div key={i} style={{position:'absolute',top:i*SLOT_H-8,right:8,fontSize:10,color:'rgba(255,255,255,0.3)',fontVariantNumeric:'tabular-nums',fontWeight:600}}>
+              {String(DAY_START+i).padStart(2,'0')}:00
+            </div>
+          ))}
+        </div>
+        {/* Columns */}
+        <div style={{position:'relative',display:'flex'}}>
+          <NowLine selectedDate={selectedDate}/>
+          {therapists.map(t=>(
+            <TherapistColumn
+              key={t.id}
+              therapist={t}
+              bookings={byTherapist[t.id]||[]}
+              onBookingClick={handleBookingClick}
+              onDrop={handleDrop}
+            />
+          ))}
+        </div>
+      </div>
+    </div>
+  );
+};
+
+// ═══════════════════════════════════════════════════════
+// BOOKING PANEL
+// ═══════════════════════════════════════════════════════
+const BookingPanel = () => {
+  const {state, dispatch} = useStore();
+  const {panelOpen, panelMode, selectedBookingId, bookingsMap, therapists, services, rooms} = state;
+  const booking = bookingsMap[selectedBookingId];
+  const [editData, setEditData] = useState({});
+  const [loading, setLoading] = useState(false);
+  const [confirmCancel, setConfirmCancel] = useState(false);
+
+  const ed = useCallback((k,v)=>setEditData(p=>({...p,[k]:v})),[]);
+
+  useEffect(()=>{
+    if(booking && panelMode==='edit'){
+      setEditData({status:booking.status||'confirmed', notes:booking.notes||'', therapist_id:String(booking.therapist_id||''), service_id:String(booking.service_id||''), room_id:String(booking.room_id||''), start_time:booking.start_time?.slice(0,16)||''});
+    }
+  },[booking, panelMode]);
+
+  const toast = (msg, type='success') => dispatch({type:'ADD_TOAST', toast:{msg,type}});
+
+  const save = async () => {
+    setLoading(true);
+    try {
+      await API.update(booking.id, editData);
+    } catch{}
+    const t = therapists.find(x=>x.id===parseInt(editData.therapist_id));
+    const s = services.find(x=>x.id===parseInt(editData.service_id));
+    const r = rooms.find(x=>x.id===parseInt(editData.room_id));
+    dispatch({type:'UPDATE_BOOKING', id:booking.id, data:{...editData, therapist:t, service:s, room:r}});
+    toast('Booking updated');
+    log.action('BOOKING_UPDATED', {id:booking.id});
+    dispatch({type:'OPEN_PANEL', mode:'view', id:booking.id});
+    setLoading(false);
+  };
+
+  const doCancel = async () => {
+    setLoading(true);
+    try { await API.cancel({booking_id:booking.id, reason:'Cancelled by staff'}); } catch{}
+    dispatch({type:'UPDATE_BOOKING', id:booking.id, data:{status:'cancelled'}});
+    toast('Booking cancelled');
+    log.action('BOOKING_CANCELLED', {id:booking.id});
+    setConfirmCancel(false);
+    setLoading(false);
+  };
+
+  const checkin = async () => {
+    setLoading(true);
+    try { await API.update(booking.id, {status:'checkin'}); } catch{}
+    dispatch({type:'UPDATE_BOOKING', id:booking.id, data:{status:'checkin'}});
+    toast('Client checked in');
+    log.action('BOOKING_CHECKIN', {id:booking.id});
+    setLoading(false);
+  };
+
+  if(!panelOpen) return null;
+
+  const tColor = booking ? therapistColor(booking.therapist?.gender) : '#8B5CF6';
+
+  const fieldRow = (label, value, color) => (
+    <div style={{marginBottom:12}}>
+      <div style={{fontSize:10,color:'rgba(255,255,255,0.35)',fontWeight:700,letterSpacing:1,textTransform:'uppercase',marginBottom:3}}>{label}</div>
+      <div style={{fontSize:13,color:color||'#e2e8f0',fontWeight:500}}>{value||'—'}</div>
+    </div>
+  );
+
+  return (
+    <>
+      <div onClick={()=>dispatch({type:'CLOSE_PANEL'})} style={{position:'fixed',inset:0,background:'rgba(0,0,0,0.45)',zIndex:40,backdropFilter:'blur(2px)'}}/>
+      <div style={{position:'fixed',top:0,right:0,bottom:0,width:370,background:'linear-gradient(180deg,#0d0d20,#10101e)',borderLeft:'1px solid rgba(255,255,255,0.07)',zIndex:50,display:'flex',flexDirection:'column',boxShadow:'-8px 0 40px rgba(0,0,0,0.55)',animation:'slideIn 0.22s ease'}}>
+
+        {/* Header */}
+        <div style={{padding:'20px 20px 14px',borderBottom:'1px solid rgba(255,255,255,0.06)',flexShrink:0}}>
+          <div style={{display:'flex',justifyContent:'space-between',alignItems:'flex-start'}}>
+            <div>
+              <div style={{fontSize:10,color:'rgba(255,255,255,0.35)',fontWeight:700,letterSpacing:1,textTransform:'uppercase',marginBottom:4}}>
+                {panelMode==='edit'?'Edit Booking':'Booking Details'}
+              </div>
+              {booking && <div style={{fontSize:19,fontWeight:800,color:'#f1f5f9',letterSpacing:-0.3}}>{booking.booking_ref}</div>}
+            </div>
+            <button onClick={()=>dispatch({type:'CLOSE_PANEL'})} style={{background:'rgba(255,255,255,0.07)',border:'none',borderRadius:8,width:32,height:32,cursor:'pointer',color:'#94a3b8',fontSize:20,display:'flex',alignItems:'center',justifyContent:'center',lineHeight:1}}>×</button>
+          </div>
+          {booking && (
+            <div style={{marginTop:10,display:'flex',gap:8,flexWrap:'wrap',alignItems:'center'}}>
+              <StatusBadge status={booking.status}/>
+              <span style={{fontSize:10,color:'rgba(255,255,255,0.35)',fontWeight:600}}>{booking.request_type}</span>
+            </div>
+          )}
+        </div>
+
+        {/* Body */}
+        <div style={{flex:1,overflowY:'auto',padding:'18px 20px'}}>
+          {!booking ? (
+            <div style={{textAlign:'center',color:'rgba(255,255,255,0.3)',marginTop:40,fontSize:13}}>No booking selected</div>
+          ) : panelMode==='view' ? (
+            <>
+              <div style={{padding:14,background:'rgba(255,255,255,0.04)',borderRadius:10,border:'1px solid rgba(255,255,255,0.06)',marginBottom:14}}>
+                <div style={{fontSize:10,color:'rgba(255,255,255,0.35)',fontWeight:700,letterSpacing:1,textTransform:'uppercase',marginBottom:8}}>Client</div>
+                <div style={{fontSize:15,fontWeight:700,color:'#f1f5f9'}}>{booking.client?.name}</div>
+                <div style={{fontSize:12,color:'rgba(255,255,255,0.45)',marginTop:2}}>{booking.client?.phone}</div>
+              </div>
+              <div style={{padding:14,background:'rgba(255,255,255,0.04)',borderRadius:10,border:`1px solid ${tColor}25`,marginBottom:14,display:'flex',alignItems:'center',gap:12}}>
+                <div style={{width:40,height:40,borderRadius:'50%',background:tColor,display:'flex',alignItems:'center',justifyContent:'center',fontSize:13,fontWeight:800,color:'#fff',flexShrink:0}}>
+                  {booking.therapist?.firstName?.[0]}{booking.therapist?.lastName?.[0]}
+                </div>
+                <div>
+                  <div style={{fontSize:14,fontWeight:700,color:'#f1f5f9'}}>{booking.therapist?.name}</div>
+                  <div style={{fontSize:11,color:tColor,fontWeight:700}}>T · {booking.therapist?.gender}</div>
+                </div>
+              </div>
+              {fieldRow('Service', booking.service?.name)}
+              {fieldRow('Room', booking.room?.name ? `R · ${booking.room.name}` : '—')}
+              {fieldRow('Start time', fmt(booking.start_time,'full'))}
+              {fieldRow('Duration', booking.service?.duration ? `${booking.service.duration} min` : '—')}
+              {fieldRow('End time', fmt(booking.end_time,'HH:mm'))}
+              {booking.notes && fieldRow('Notes', booking.notes, '#a78bfa')}
+            </>
+          ) : (
+            <>
+              <Select label="Status" value={editData.status} onChange={v=>ed('status',v)}
+                options={Object.entries(STATUS).map(([k,v])=>({value:k,label:v.label}))}/>
+              <Select label="Therapist (T)" value={editData.therapist_id} onChange={v=>ed('therapist_id',v)}
+                options={[{value:'',label:'— Select —'},...therapists.map(t=>({value:String(t.id),label:`${t.name} (${t.gender})`}))]}/>
+              <Select label="Service" value={editData.service_id} onChange={v=>ed('service_id',v)}
+                options={[{value:'',label:'— Select —'},...services.map(s=>({value:String(s.id),label:`${s.name} (${s.duration}min)`}))]}/>
+              <Select label="Room (R)" value={editData.room_id} onChange={v=>ed('room_id',v)}
+                options={[{value:'',label:'— Any —'},...rooms.map(r=>({value:String(r.id),label:r.name}))]}/>
+              <Input label="Start Time" value={editData.start_time} onChange={v=>ed('start_time',v)} type="datetime-local"/>
+              <div style={{marginBottom:14}}>
+                <label style={{display:'block',fontSize:10,color:'rgba(255,255,255,0.4)',fontWeight:700,letterSpacing:1,textTransform:'uppercase',marginBottom:5}}>Notes</label>
+                <textarea value={editData.notes} onChange={e=>ed('notes',e.target.value)} rows={3}
+                  style={{width:'100%',background:'rgba(255,255,255,0.05)',border:'1px solid rgba(255,255,255,0.1)',borderRadius:8,padding:'9px 12px',color:'#e2e8f0',fontSize:13,outline:'none',fontFamily:'inherit',resize:'vertical'}}/>
+              </div>
+            </>
+          )}
+        </div>
+
+        {/* Actions */}
+        <div style={{padding:'12px 20px',borderTop:'1px solid rgba(255,255,255,0.06)',flexShrink:0,display:'flex',gap:8,flexWrap:'wrap'}}>
+          {panelMode==='view' && booking?.status!=='cancelled' && (
+            <>
+              <Btn onClick={()=>dispatch({type:'OPEN_PANEL',mode:'edit',id:booking.id})}>Edit</Btn>
+              {booking.status==='confirmed' && <Btn variant="pink" onClick={checkin} disabled={loading}>Check In</Btn>}
+              {booking.status==='checkin' && <Btn variant="green" onClick={async()=>{
+                dispatch({type:'UPDATE_BOOKING',id:booking.id,data:{status:'completed'}});
+                toast('Checkout complete');
+                log.action('BOOKING_CHECKOUT',{id:booking.id});
+              }}>Complete</Btn>}
+              {!confirmCancel
+                ? <Btn variant="danger" onClick={()=>setConfirmCancel(true)}>Cancel</Btn>
+                : <div style={{display:'flex',gap:6,width:'100%'}}>
+                    <Btn variant="danger" onClick={doCancel} disabled={loading} style={{flex:1}}>Confirm Cancel</Btn>
+                    <Btn variant="ghost" onClick={()=>setConfirmCancel(false)} style={{flex:1}}>Keep</Btn>
+                  </div>
+              }
+            </>
+          )}
+          {panelMode==='edit' && (
+            <>
+              <Btn onClick={save} disabled={loading} style={{flex:1}}>{loading?'Saving…':'Save Changes'}</Btn>
+              <Btn variant="ghost" onClick={()=>dispatch({type:'OPEN_PANEL',mode:'view',id:booking.id})}>Discard</Btn>
+            </>
+          )}
+        </div>
+      </div>
+    </>
+  );
+};
+
+// ═══════════════════════════════════════════════════════
+// CREATE BOOKING FORM
+// ═══════════════════════════════════════════════════════
+const BookingForm = () => {
+  const {state, dispatch} = useStore();
+  const {createOpen, therapists, services, rooms} = state;
+  const [form, setForm] = useState({client_name:'',client_phone:'',therapist_id:'',service_id:'',room_id:'',start_time:`${state.selectedDate}T10:00`,request_type:'Standard',notes:'',status:'confirmed'});
+  const [errors, setErrors] = useState({});
+  const [loading, setLoading] = useState(false);
+  const set = useCallback((k,v)=>{ setForm(p=>({...p,[k]:v})); setErrors(p=>({...p,[k]:undefined})); },[]);
+  const toast = (msg,type='success') => dispatch({type:'ADD_TOAST', toast:{msg,type}});
+
+  const validate = () => {
+    const e={};
+    if(!form.client_name.trim()) e.client_name='Required';
+    if(!form.therapist_id) e.therapist_id='Required';
+    if(!form.service_id) e.service_id='Required';
+    if(!form.start_time) e.start_time='Required';
+    setErrors(e);
+    return Object.keys(e).length===0;
+  };
+
+  const submit = async () => {
+    if(!validate()) return;
+    setLoading(true);
+    const t = therapists.find(x=>x.id===parseInt(form.therapist_id));
+    const s = services.find(x=>x.id===parseInt(form.service_id));
+    const r = rooms.find(x=>x.id===parseInt(form.room_id));
+    const start = new Date(form.start_time).toISOString();
+    const end = addMins(start, s?.duration||60);
+    const payload = {...form, therapist_id:parseInt(form.therapist_id), service_id:parseInt(form.service_id), room_id:parseInt(form.room_id)||null, start_time:start, end_time:end, client:{name:form.client_name,phone:form.client_phone}};
+    let id = Date.now();
+    try {
+      const resp = await API.create(payload);
+      id = resp.data?.data?.id || resp.data?.id || id;
+    } catch{}
+    dispatch({type:'ADD_BOOKING', booking:{...payload, id, booking_ref:`BK${id}`, therapist:t, service:s, room:r}});
+    toast('Booking created successfully');
+    log.action('BOOKING_CREATED', {id, client:form.client_name});
+    setForm({client_name:'',client_phone:'',therapist_id:'',service_id:'',room_id:'',start_time:`${state.selectedDate}T10:00`,request_type:'Standard',notes:'',status:'confirmed'});
+    dispatch({type:'CLOSE_CREATE'});
+    setLoading(false);
+  };
+
+  if(!createOpen) return null;
+
+  const secStyle = {marginBottom:16,padding:'14px 16px',background:'rgba(255,255,255,0.03)',borderRadius:10,border:'1px solid rgba(255,255,255,0.06)'};
+  const secLabel = {fontSize:10,color:'rgba(255,255,255,0.4)',fontWeight:700,letterSpacing:1,textTransform:'uppercase',marginBottom:10,display:'block'};
+
+  return (
+    <>
+      <div onClick={()=>dispatch({type:'CLOSE_CREATE'})} style={{position:'fixed',inset:0,background:'rgba(0,0,0,0.6)',zIndex:60,backdropFilter:'blur(3px)'}}/>
+      <div style={{position:'fixed',top:'50%',left:'50%',transform:'translate(-50%,-50%)',width:460,maxWidth:'95vw',maxHeight:'90vh',background:'#0d0d20',border:'1px solid rgba(255,255,255,0.09)',borderRadius:18,zIndex:70,display:'flex',flexDirection:'column',overflow:'hidden',boxShadow:'0 32px 80px rgba(0,0,0,0.75)',animation:'modalIn 0.22s ease'}}>
+
+        <div style={{padding:'20px 24px 16px',borderBottom:'1px solid rgba(255,255,255,0.06)',flexShrink:0,display:'flex',justifyContent:'space-between',alignItems:'center'}}>
+          <div>
+            <div style={{fontSize:19,fontWeight:800,color:'#f1f5f9'}}>New Booking</div>
+            <div style={{fontSize:12,color:'rgba(255,255,255,0.35)',marginTop:2}}>{fmt(state.selectedDate,'dd MMM')} · Fill in all required fields</div>
+          </div>
+          <button onClick={()=>dispatch({type:'CLOSE_CREATE'})} style={{background:'rgba(255,255,255,0.07)',border:'none',borderRadius:8,width:32,height:32,cursor:'pointer',color:'#94a3b8',fontSize:20,display:'flex',alignItems:'center',justifyContent:'center'}}>×</button>
+        </div>
+
+        <div style={{flex:1,overflowY:'auto',padding:'16px 24px'}}>
+          <div style={secStyle}>
+            <span style={secLabel}>Client Information</span>
+            <Input label="Full Name *" value={form.client_name} onChange={v=>set('client_name',v)} placeholder="e.g. Alice Smith" error={errors.client_name}/>
+            <Input label="Phone" value={form.client_phone} onChange={v=>set('client_phone',v)} placeholder="+1 000 000 0000"/>
+          </div>
+          <div style={secStyle}>
+            <span style={secLabel}>Service &amp; Staff</span>
+            <Select label="Service *" value={form.service_id} onChange={v=>set('service_id',v)} error={errors.service_id}
+              options={[{value:'',label:'— Select service —'},...services.map(s=>({value:String(s.id),label:`${s.name} · ${s.duration}min · $${s.price}`}))]}/>
+            <Select label="Therapist (T) *" value={form.therapist_id} onChange={v=>set('therapist_id',v)} error={errors.therapist_id}
+              options={[{value:'',label:'— Select therapist —'},...therapists.map(t=>({value:String(t.id),label:`${t.name} (${t.gender})`}))]}/>
+            <Select label="Room (R)" value={form.room_id} onChange={v=>set('room_id',v)}
+              options={[{value:'',label:'— Any available —'},...rooms.map(r=>({value:String(r.id),label:r.name}))]}/>
+          </div>
+          <div style={secStyle}>
+            <span style={secLabel}>Schedule &amp; Type</span>
+            <Input label="Start Time *" value={form.start_time} onChange={v=>set('start_time',v)} type="datetime-local" error={errors.start_time}/>
+            <Select label="Request Type" value={form.request_type} onChange={v=>set('request_type',v)}
+              options={['Standard','VIP','Couple','Corporate'].map(v=>({value:v,label:v}))}/>
+            <div style={{marginBottom:0}}>
+              <label style={{display:'block',fontSize:10,color:'rgba(255,255,255,0.4)',fontWeight:700,letterSpacing:1,textTransform:'uppercase',marginBottom:5}}>Notes</label>
+              <textarea value={form.notes} onChange={e=>set('notes',e.target.value)} rows={2} placeholder="Special requests, allergies…"
+                style={{width:'100%',background:'rgba(255,255,255,0.05)',border:'1px solid rgba(255,255,255,0.1)',borderRadius:8,padding:'9px 12px',color:'#e2e8f0',fontSize:13,outline:'none',fontFamily:'inherit',resize:'vertical'}}/>
+            </div>
+          </div>
+        </div>
+
+        <div style={{padding:'14px 24px',borderTop:'1px solid rgba(255,255,255,0.06)',display:'flex',gap:10,flexShrink:0}}>
+          <Btn onClick={submit} disabled={loading} style={{flex:1,padding:'12px',fontSize:14}}>
+            {loading?'Creating…':'Create Booking'}
+          </Btn>
+          <Btn variant="ghost" onClick={()=>dispatch({type:'CLOSE_CREATE'})}>Cancel</Btn>
+        </div>
+      </div>
+    </>
+  );
+};
+
+// ═══════════════════════════════════════════════════════
+// BOOKINGS SIDEBAR LIST
+// ═══════════════════════════════════════════════════════
+const BookingsList = memo(() => {
+  const {state, dispatch} = useStore();
+  const [collapsed, setCollapsed] = useState(false);
+
+  const bookings = useMemo(()=>{
+    const {bookings:all, search, statusFilter, selectedDate} = state;
+    return all.filter(b=>{
+      if(b.start_time?.split('T')[0]!==selectedDate) return false;
+      if(statusFilter!=='all' && b.status!==statusFilter) return false;
+      if(search){const q=search.toLowerCase();return b.client?.name?.toLowerCase().includes(q)||b.booking_ref?.toLowerCase().includes(q)||b.therapist?.name?.toLowerCase().includes(q);}
+      return true;
+    });
+  },[state.bookings, state.search, state.statusFilter, state.selectedDate]);
+
+  const grouped = useMemo(()=>bookings.reduce((a,b)=>{const s=b.status||'confirmed';if(!a[s])a[s]=[];a[s].push(b);return a;},{}), [bookings]);
+
+  if(collapsed){
+    return (
+      <div style={{width:28,borderRight:'1px solid rgba(255,255,255,0.06)',background:'rgba(8,8,22,0.95)',display:'flex',flexDirection:'column',alignItems:'center',paddingTop:12,cursor:'pointer'}} onClick={()=>setCollapsed(false)}>
+        <span style={{color:'rgba(255,255,255,0.3)',fontSize:15,transform:'rotate(180deg)',display:'block'}}>‹</span>
+      </div>
+    );
+  }
+
+  return (
+    <div style={{width:230,borderRight:'1px solid rgba(255,255,255,0.06)',background:'rgba(8,8,22,0.95)',display:'flex',flexDirection:'column',flexShrink:0,overflow:'hidden'}}>
+      <div style={{padding:'12px 14px 10px',borderBottom:'1px solid rgba(255,255,255,0.05)',display:'flex',justifyContent:'space-between',alignItems:'center',flexShrink:0}}>
+        <div>
+          <div style={{fontSize:12,fontWeight:700,color:'#f1f5f9'}}>Today's Bookings</div>
+          <div style={{fontSize:10,color:'rgba(255,255,255,0.3)',marginTop:1}}>{bookings.length} showing</div>
+        </div>
+        <span style={{color:'rgba(255,255,255,0.25)',cursor:'pointer',fontSize:16,padding:'2px 4px'}} onClick={()=>setCollapsed(true)}>‹</span>
+      </div>
+
+      {/* Status pills */}
+      <div style={{display:'flex',flexWrap:'wrap',gap:4,padding:'8px 10px',borderBottom:'1px solid rgba(255,255,255,0.04)',flexShrink:0}}>
+        {Object.entries(grouped).map(([s,items])=>{
+          const st=statusStyle(s);
+          return <div key={s} style={{background:`${st.bg}20`,borderRadius:6,padding:'3px 8px',textAlign:'center',border:`1px solid ${st.bg}40`}}>
+            <span style={{fontSize:13,fontWeight:800,color:st.bg}}>{items.length}</span>
+            <span style={{fontSize:8,color:'rgba(255,255,255,0.3)',marginLeft:4,textTransform:'uppercase'}}>{s.slice(0,4)}</span>
+          </div>;
+        })}
+      </div>
+
+      <div style={{flex:1,overflowY:'auto'}}>
+        {bookings.length===0
+          ? <div style={{padding:20,textAlign:'center',color:'rgba(255,255,255,0.25)',fontSize:12}}>No bookings found</div>
+          : bookings.map(b=>{
+              const s=statusStyle(b.status);
+              const tc=therapistColor(b.therapist?.gender);
+              const sel=b.id===state.selectedBookingId;
+              return (
+                <div key={b.id} onClick={()=>{dispatch({type:'SELECT_BOOKING',id:b.id});dispatch({type:'OPEN_PANEL',mode:'view',id:b.id});}}
+                  style={{padding:'9px 14px',borderBottom:'1px solid rgba(255,255,255,0.04)',cursor:'pointer',background:sel?'rgba(124,106,255,0.1)':'transparent',borderLeft:`3px solid ${sel?'#7c6aff':'transparent'}`,transition:'background 0.1s'}}>
+                  <div style={{display:'flex',justifyContent:'space-between',alignItems:'flex-start',gap:6}}>
+                    <div style={{minWidth:0,flex:1}}>
+                      <div style={{fontSize:12,fontWeight:700,color:'#f1f5f9',whiteSpace:'nowrap',overflow:'hidden',textOverflow:'ellipsis'}}>{b.client?.name}</div>
+                      <div style={{fontSize:10,color:'rgba(255,255,255,0.4)',marginTop:1,whiteSpace:'nowrap',overflow:'hidden',textOverflow:'ellipsis'}}>{b.service?.name}</div>
+                    </div>
+                    <span style={{fontSize:8,fontWeight:700,padding:'2px 7px',borderRadius:10,background:s.bg,color:'#fff',textTransform:'uppercase',flexShrink:0,whiteSpace:'nowrap'}}>{s.label}</span>
+                  </div>
+                  <div style={{display:'flex',justifyContent:'space-between',marginTop:5}}>
+                    <div style={{display:'flex',alignItems:'center',gap:4}}>
+                      <div style={{width:14,height:14,borderRadius:'50%',background:tc,display:'flex',alignItems:'center',justifyContent:'center',fontSize:7,fontWeight:800,color:'#fff'}}>{b.therapist?.firstName?.[0]}</div>
+                      <span style={{fontSize:9,color:'rgba(255,255,255,0.35)'}}>{b.therapist?.name?.split(' ')[0]}</span>
+                    </div>
+                    <span style={{fontSize:9,color:'rgba(255,255,255,0.3)',fontVariantNumeric:'tabular-nums'}}>{fmt(b.start_time,'HH:mm')}</span>
+                  </div>
+                </div>
+              );
+            })
+        }
+      </div>
+    </div>
+  );
+});
+
+// ═══════════════════════════════════════════════════════
+// DASHBOARD STATS
+// ═══════════════════════════════════════════════════════
+const DashboardStats = memo(() => {
+  const {state} = useStore();
+  const stats = useMemo(()=>{
+    const b = state.bookings.filter(x=>x.start_time?.split('T')[0]===state.selectedDate);
+    return {
+      total:     b.length,
+      confirmed: b.filter(x=>x.status==='confirmed').length,
+      active:    b.filter(x=>['checkin','inprogress'].includes(x.status)).length,
+      completed: b.filter(x=>x.status==='completed').length,
+      cancelled: b.filter(x=>x.status==='cancelled').length,
+      revenue:   b.filter(x=>x.status!=='cancelled').reduce((a,x)=>a+(x.service?.price||0),0),
+    };
+  },[state.bookings, state.selectedDate]);
+
+  const cards = [
+    {label:'Total',    val:stats.total,     color:'#a78bfa'},
+    {label:'Confirmed',val:stats.confirmed, color:'#3B82F6'},
+    {label:'Active',   val:stats.active,    color:'#EC4899'},
+    {label:'Completed',val:stats.completed, color:'#10B981'},
+    {label:'Cancelled',val:stats.cancelled, color:'#6B7280'},
+    {label:'Revenue',  val:`$${stats.revenue.toLocaleString()}`, color:'#F59E0B'},
+  ];
+
+  return (
+    <div style={{display:'flex',gap:8,padding:'8px 16px',borderBottom:'1px solid rgba(255,255,255,0.04)',flexShrink:0,overflowX:'auto',background:'rgba(8,8,22,0.8)'}}>
+      {cards.map(({label,val,color})=>(
+        <div key={label} style={{background:'rgba(255,255,255,0.04)',border:`1px solid ${color}25`,borderRadius:8,padding:'8px 14px',minWidth:80,flexShrink:0}}>
+          <div style={{fontSize:20,fontWeight:800,color,lineHeight:1}}>{val}</div>
+          <div style={{fontSize:9,color:'rgba(255,255,255,0.35)',fontWeight:700,marginTop:2,textTransform:'uppercase',letterSpacing:0.5}}>{label}</div>
+        </div>
+      ))}
+    </div>
+  );
+});
+
+// ═══════════════════════════════════════════════════════
+// TOOLBAR
+// ═══════════════════════════════════════════════════════
+const Toolbar = memo(() => {
+  const {state, dispatch} = useStore();
+  const {selectedDate, search, statusFilter, user} = state;
+
+  const changeDate = (d) => {
+    const nd = new Date(selectedDate); nd.setDate(nd.getDate()+d);
+    dispatch({type:'SET_DATE', date:nd.toISOString().split('T')[0]});
+  };
+
+  return (
+    <div style={{display:'flex',alignItems:'center',gap:10,padding:'10px 16px',borderBottom:'1px solid rgba(255,255,255,0.06)',background:'rgba(8,8,22,0.99)',flexWrap:'wrap',flexShrink:0}}>
+      {/* Logo */}
+      <div style={{display:'flex',alignItems:'center',gap:8,marginRight:4}}>
+        <div style={{width:32,height:32,borderRadius:8,background:'linear-gradient(135deg,#7c6aff,#EC4899)',display:'flex',alignItems:'center',justifyContent:'center',fontSize:15}}>✦</div>
+        <span style={{fontSize:14,fontWeight:800,color:'#f1f5f9',letterSpacing:-0.4}}>NatureLand</span>
+      </div>
+
+      {/* Date nav */}
+      <div style={{display:'flex',alignItems:'center',gap:4,background:'rgba(255,255,255,0.05)',borderRadius:8,padding:'4px 8px'}}>
+        <button onClick={()=>changeDate(-1)} style={{background:'none',border:'none',color:'#94a3b8',cursor:'pointer',fontSize:16,padding:'0 2px',lineHeight:1}}>‹</button>
+        <input type="date" value={selectedDate} onChange={e=>dispatch({type:'SET_DATE',date:e.target.value})}
+          style={{background:'transparent',border:'none',color:'#e2e8f0',fontSize:12,fontWeight:700,outline:'none',cursor:'pointer',colorScheme:'dark'}}/>
+        <button onClick={()=>changeDate(1)} style={{background:'none',border:'none',color:'#94a3b8',cursor:'pointer',fontSize:16,padding:'0 2px',lineHeight:1}}>›</button>
+        <button onClick={()=>dispatch({type:'SET_DATE',date:today()})}
+          style={{background:'rgba(124,106,255,0.2)',border:'none',borderRadius:5,padding:'2px 7px',color:'#a78bfa',cursor:'pointer',fontSize:9,fontWeight:800,letterSpacing:0.5}}>TODAY</button>
+      </div>
+
+      {/* Search */}
+      <div style={{flex:1,minWidth:160,position:'relative'}}>
+        <span style={{position:'absolute',left:9,top:'50%',transform:'translateY(-50%)',color:'rgba(255,255,255,0.25)',fontSize:13,pointerEvents:'none'}}>⌕</span>
+        <input placeholder="Search client, ref, therapist…" value={search} onChange={e=>dispatch({type:'SET_SEARCH',val:e.target.value})}
+          style={{width:'100%',background:'rgba(255,255,255,0.06)',border:'1px solid rgba(255,255,255,0.09)',borderRadius:8,padding:'8px 10px 8px 28px',color:'#e2e8f0',fontSize:12,outline:'none'}}/>
+      </div>
+
+      {/* Status filter */}
+      <select value={statusFilter} onChange={e=>dispatch({type:'SET_STATUS_F',val:e.target.value})}
+        style={{background:'rgba(255,255,255,0.06)',border:'1px solid rgba(255,255,255,0.09)',borderRadius:8,padding:'8px 12px',color:'#e2e8f0',fontSize:12,outline:'none',cursor:'pointer'}}>
+        <option value="all">All Statuses</option>
+        {Object.entries(STATUS).map(([k,v])=><option key={k} value={k}>{v.label}</option>)}
+      </select>
+
+      {/* User + logout */}
+      <div style={{display:'flex',alignItems:'center',gap:8}}>
+        <div style={{fontSize:11,color:'rgba(255,255,255,0.4)',textAlign:'right'}}>
+          <div style={{color:'#e2e8f0',fontWeight:600}}>{user?.name||'Staff'}</div>
+          <div style={{fontSize:9}}>Operations</div>
+        </div>
+        <button onClick={()=>{ localStorage.removeItem('spa_token'); dispatch({type:'LOGOUT'}); }}
+          style={{background:'rgba(255,255,255,0.06)',border:'1px solid rgba(255,255,255,0.08)',borderRadius:7,padding:'5px 10px',color:'rgba(255,255,255,0.45)',cursor:'pointer',fontSize:11}}>
+          Sign out
+        </button>
+      </div>
+
+      {/* New Booking */}
+      <Btn onClick={()=>dispatch({type:'OPEN_CREATE'})} style={{padding:'9px 16px',whiteSpace:'nowrap'}}>
+        + New Booking
+      </Btn>
+    </div>
+  );
+});
+
+// ═══════════════════════════════════════════════════════
+// MAIN CALENDAR PAGE
+// ═══════════════════════════════════════════════════════
+const CalendarPage = () => {
+  const {state, dispatch} = useStore();
+  const {selectedDate, loading} = state;
+
+  const loadData = useCallback(async () => {
+    dispatch({type:'SET_LOADING', val:true});
+    log.info('PAGE', 'Loading data for', selectedDate);
+    const mockTherapists = genTherapists(25);
+    dispatch({type:'SET_THERAPISTS', data:mockTherapists});
+    try {
+      const [bResp, tResp] = await Promise.allSettled([
+        API.bookings({date:selectedDate, per_page:2000}),
+        API.therapists({per_page:200}),
+      ]);
+      const apiT = tResp.status==='fulfilled' ? (tResp.value?.data?.data || tResp.value?.data || []) : [];
+      const apiB = bResp.status==='fulfilled' ? (bResp.value?.data?.data || bResp.value?.data || []) : [];
+      if(apiT.length) dispatch({type:'SET_THERAPISTS', data:apiT});
+      if(apiB.length){
+        dispatch({type:'SET_BOOKINGS', data:apiB});
+        log.info('PAGE',`Loaded ${apiB.length} bookings from API`);
+        dispatch({type:'SET_LOADING', val:false});
+        return;
+      }
+      throw new Error('No API data');
+    } catch(err){
+      log.info('PAGE','Using mock data:', err.message);
+      const th = state.therapists.length ? state.therapists : mockTherapists;
+      const mocks = genBookings(th, selectedDate, 200);
+      dispatch({type:'SET_BOOKINGS', data:mocks});
+      log.info('PAGE',`Generated ${mocks.length} mock bookings`);
+    } finally {
+      dispatch({type:'SET_LOADING', val:false});
+    }
+  },[selectedDate]);
+
+  useEffect(()=>{ loadData(); },[selectedDate]);
+
+  return (
+    <div style={{height:'100vh',display:'flex',flexDirection:'column',background:'#080816',overflow:'hidden'}}>
+      <Toolbar/>
+      <DashboardStats/>
+      {/* Legend */}
+      <div style={{display:'flex',gap:14,padding:'6px 16px',borderBottom:'1px solid rgba(255,255,255,0.04)',flexShrink:0,background:'rgba(8,8,22,0.8)',overflowX:'auto'}}>
+        {[['#3B82F6','Confirmed'],['#EC4899','In Progress'],['#10B981','Completed'],['#6B7280','Cancelled']].map(([c,l])=>(
+          <div key={l} style={{display:'flex',alignItems:'center',gap:5,flexShrink:0}}>
+            <div style={{width:10,height:10,borderRadius:3,background:c}}/>
+            <span style={{fontSize:10,color:'rgba(255,255,255,0.3)',fontWeight:500}}>{l}</span>
+          </div>
+        ))}
+        <div style={{display:'flex',alignItems:'center',gap:5,flexShrink:0}}>
+          <div style={{width:10,height:10,borderRadius:'50%',background:'#EC4899'}}/>
+          <span style={{fontSize:10,color:'rgba(255,255,255,0.3)'}}>Female (T)</span>
+        </div>
+        <div style={{display:'flex',alignItems:'center',gap:5,flexShrink:0}}>
+          <div style={{width:10,height:10,borderRadius:'50%',background:'#3B82F6'}}/>
+          <span style={{fontSize:10,color:'rgba(255,255,255,0.3)'}}>Male (T)</span>
+        </div>
+        <div style={{marginLeft:'auto',fontSize:10,color:'rgba(255,255,255,0.2)',whiteSpace:'nowrap',flexShrink:0}}>
+          Drag to reschedule · Click to view/edit
+        </div>
+      </div>
+
+      {/* Content */}
+      <div style={{flex:1,overflow:'hidden',display:'flex'}}>
+        <BookingsList/>
+        <div style={{flex:1,overflow:'hidden',position:'relative'}}>
+          {loading
+            ? <div style={{display:'flex',flexDirection:'column',alignItems:'center',justifyContent:'center',height:'100%',gap:14}}>
+                <div style={{width:36,height:36,borderRadius:'50%',border:'3px solid rgba(124,106,255,0.2)',borderTop:'3px solid #7c6aff',animation:'spin 0.8s linear infinite'}}/>
+                <div style={{color:'rgba(255,255,255,0.35)',fontSize:13}}>Loading calendar…</div>
+              </div>
+            : <CalendarGrid/>
+          }
+        </div>
+      </div>
+
+      <BookingPanel/>
+      <BookingForm/>
+      <ToastContainer/>
+    </div>
+  );
+};
+
+// ═══════════════════════════════════════════════════════
+// APP ROOT
+// ═══════════════════════════════════════════════════════
+const App = () => {
+  const [state, dispatch] = useReducer(reducer, initialState);
+  return (
+    <Ctx.Provider value={{state, dispatch}}>
+      {state.token ? <CalendarPage/> : <LoginPage/>}
+    </Ctx.Provider>
+  );
+};
+
+ReactDOM.createRoot(document.getElementById('root')).render(<App/>);
+</script>
+</body>
+</html>
