@@ -36,8 +36,10 @@ const useStore = create(
 
       addBooking: (booking) => {
         set((s) => {
-          s.bookings.push(booking);
-          s.bookingsMap[booking.id] = booking;
+          // Use spread to create a NEW array reference — immer's push() keeps
+          // the same reference, so Zustand selectors see no change and skip re-render
+          s.bookings = [...s.bookings, booking];
+          s.bookingsMap = { ...s.bookingsMap, [booking.id]: booking };
         });
         logger.action('BOOKING_CREATED', booking);
       },
@@ -46,8 +48,14 @@ const useStore = create(
         set((s) => {
           const idx = s.bookings.findIndex((b) => b.id === id);
           if (idx !== -1) {
-            Object.assign(s.bookings[idx], data);
-            s.bookingsMap[id] = s.bookings[idx];
+            const updated = { ...s.bookings[idx], ...data };
+            // Spread into new array so reference changes and selectors re-render
+            s.bookings = [
+              ...s.bookings.slice(0, idx),
+              updated,
+              ...s.bookings.slice(idx + 1),
+            ];
+            s.bookingsMap = { ...s.bookingsMap, [id]: updated };
           }
         });
         logger.action('BOOKING_UPDATED', { id, data });
