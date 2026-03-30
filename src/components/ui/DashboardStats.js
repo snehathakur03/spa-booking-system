@@ -6,7 +6,7 @@ const DashboardStats = memo(() => {
   const selectedDate = useStore((s) => s.selectedDate);
 
   const stats = useMemo(() => {
-    const b = bookings.filter((x) => x.start_time?.split('T')[0] === selectedDate);
+    const b = bookings.filter((x) => x.start_time?.slice(0, 10) === selectedDate);
     return {
       total:     b.length,
       confirmed: b.filter((x) => x.status === 'confirmed').length,

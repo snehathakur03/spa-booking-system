@@ -1,10 +1,11 @@
 import React, { useCallback, useMemo, useRef, memo } from 'react';
 import { DndContext, DragOverlay, useDraggable, useDroppable, PointerSensor, useSensor, useSensors } from '@dnd-kit/core';
 import useStore from '../../store';
+import useFilteredBookings from '../../hooks/useFilteredBookings';
 import { getStatusStyle, getTherapistColor } from '../../utils/colorUtils';
 import {
   SLOT_HEIGHT, DAY_START_HOUR, DAY_END_HOUR, TOTAL_MINUTES,
-  topPosition, blockHeight, generateTimeSlots, formatTime, snapToSlot,
+  topPosition, blockHeight, generateTimeSlots, formatTime, minsToTime, snapToSlot,
 } from '../../utils/dateUtils';
 import ErrorBoundary from '../ui/ErrorBoundary';
 import NowLine from './NowLine';
@@ -184,10 +185,13 @@ const CalendarGrid = () => {
   const statusFilter = useStore((s) => s.statusFilter);
   const scrollRef    = useRef(null);
 
-  // Filter inline — same logic as useFilteredBookings hook
+  // Filter inline — handles both local "2026-03-28T10:00:00" and UTC ISO strings
   const filteredBookings = useMemo(() => {
     return bookings.filter((b) => {
-      if (b.start_time?.split('T')[0] !== selectedDate) return false;
+      if (!b.start_time) return false;
+      // Always compare the local-date portion (first 10 chars before T)
+      const bookingDate = b.start_time.slice(0, 10);
+      if (bookingDate !== selectedDate) return false;
       if (statusFilter !== 'all' && b.status !== statusFilter) return false;
       if (searchQuery) {
         const q = searchQuery.toLowerCase();

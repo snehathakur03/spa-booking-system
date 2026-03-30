@@ -10,7 +10,7 @@ const useFilteredBookings = () => {
 
   return useMemo(() => {
     return bookings.filter((b) => {
-      const dateStr = b.start_time?.split('T')[0];
+      const dateStr = b.start_time?.slice(0, 10);
       if (dateStr !== selectedDate) return false;
       if (statusFilter !== 'all' && b.status !== statusFilter) return false;
       if (therapistFilter && b.therapist_id !== therapistFilter) return false;

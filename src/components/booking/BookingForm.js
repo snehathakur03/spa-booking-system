@@ -46,19 +46,30 @@ const BookingForm = () => {
     if (!validate()) return;
     setLoading(true);
 
-    const t = therapists.find((x) => x.id === parseInt(form.therapist_id));
-    const s = services.find((x)   => x.id === parseInt(form.service_id));
-    const r = rooms.find((x)      => x.id === parseInt(form.room_id));
+    const therapistIdInt = parseInt(form.therapist_id, 10);
+    const serviceIdInt   = parseInt(form.service_id,   10);
+    const roomIdInt      = parseInt(form.room_id,      10) || null;
 
-    const start = new Date(form.start_time).toISOString();
-    const end   = new Date(new Date(form.start_time).getTime() + (s?.duration || 60) * 60000).toISOString();
+    // Match by number — form select gives strings, therapist.id is a number
+    const t = therapists.find((x) => x.id === therapistIdInt);
+    const s = services.find((x)   => x.id === serviceIdInt);
+    const r = rooms.find((x)      => x.id === roomIdInt);
+
+    // Preserve local time — toISOString() converts to UTC which shifts the date
+    // in timezones ahead of UTC (IST UTC+5:30 turns 10:00 into previous day 04:30Z)
+    const start = form.start_time.length === 16
+      ? form.start_time + ':00'
+      : form.start_time;
+    const endMs = new Date(start).getTime() + (s?.duration || 60) * 60000;
+    const end   = new Date(endMs).toLocaleString('sv-SE').replace(' ', 'T');
 
     const payload = {
       client:       { name: form.client_name, phone: form.client_phone },
-      therapist_id: parseInt(form.therapist_id),
-      service_id:   parseInt(form.service_id),
-      room_id:      parseInt(form.room_id) || null,
-      start_time:   start, end_time: end,
+      therapist_id: therapistIdInt,
+      service_id:   serviceIdInt,
+      room_id:      roomIdInt,
+      start_time:   start,
+      end_time:     end,
       notes:        form.notes,
       request_type: form.request_type,
       status:       'confirmed',
@@ -72,13 +83,13 @@ const BookingForm = () => {
 
     useStore.getState().addBooking({
       ...payload, id,
-      booking_ref: `BK${id}`,
+      booking_ref: 'BK' + id,
       therapist: t, service: s, room: r,
     });
 
-    toast.success('Booking created');
+    toast.success('Booking created successfully!');
     logger.action('BOOKING_CREATED', { id, client: form.client_name });
-    setForm({ ...INIT, start_time: `${selectedDate}T10:00` });
+    setForm({ ...INIT, start_time: selectedDate + 'T10:00' });
     useStore.getState().closeCreate();
     setLoading(false);
   };

@@ -13,7 +13,7 @@ const BookingsList = memo(() => {
 
   const filtered = useMemo(() => {
     return bookings.filter((b) => {
-      if (b.start_time?.split('T')[0] !== selectedDate) return false;
+      if (b.start_time?.slice(0, 10) !== selectedDate) return false;
       if (statusFilter !== 'all' && b.status !== statusFilter) return false;
       if (searchQuery) {
         const q = searchQuery.toLowerCase();
