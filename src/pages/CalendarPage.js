@@ -19,36 +19,36 @@ const DEMO_BOOKING_COUNT   = 200;
 // ── Safely extract an array from any API response shape ──────────────────────
 // Handles: { data: [...] }, { data: { data: [...] } }, { data: { items: [...] } }
 // { data: { bookings: [...] } }, plain [...], { success, data: [...] } etc.
-const extractArray = (resp) => {
-  const raw = resp?.data;
-  if (!raw) return [];
-  if (Array.isArray(raw)) return raw;
+// const extractArray = (resp) => {
+//   const raw = resp?.data;
+//   if (!raw) return [];
+//   if (Array.isArray(raw)) return raw;
 
-  // Common Laravel / custom API nesting patterns
-  const candidates = [
-    raw?.data,
-    raw?.items,
-    raw?.bookings,
-    raw?.therapists,
-    raw?.results,
-    raw?.list,
-    raw?.records,
-  ];
+//   // Common Laravel / custom API nesting patterns
+//   const candidates = [
+//     raw?.data,
+//     raw?.items,
+//     raw?.bookings,
+//     raw?.therapists,
+//     raw?.results,
+//     raw?.list,
+//     raw?.records,
+//   ];
 
-  for (const c of candidates) {
-    if (Array.isArray(c) && c.length > 0) return c;
-  }
+//   for (const c of candidates) {
+//     if (Array.isArray(c) && c.length > 0) return c;
+//   }
 
-  // data.data is a paginator object with a nested array?
-  if (raw?.data && typeof raw.data === 'object') {
-    for (const key of Object.keys(raw.data)) {
-      if (Array.isArray(raw.data[key])) return raw.data[key];
-    }
-  }
+//   // data.data is a paginator object with a nested array?
+//   if (raw?.data && typeof raw.data === 'object') {
+//     for (const key of Object.keys(raw.data)) {
+//       if (Array.isArray(raw.data[key])) return raw.data[key];
+//     }
+//   }
 
-  logger.warn('API_PARSE', 'Could not extract array from response:', JSON.stringify(raw).slice(0, 300));
-  return [];
-};
+//   logger.warn('API_PARSE', 'Could not extract array from response:', JSON.stringify(raw).slice(0, 300));
+//   return [];
+// };
 
 const LoadingSpinner = () => (
   <div style={{ display:'flex', alignItems:'center', justifyContent:'center', height:'100%', flexDirection:'column', gap:16 }}>
@@ -200,27 +200,27 @@ useEffect(() => {
 
 // ── Normalize a raw API booking to our internal shape ─────────────────────────
 // Different backends use different field names — map them all to our standard
-const normalizeBooking = (b) => ({
-  id:           b.id,
-  booking_ref:  b.booking_ref || b.ref || b.reference || `BK${b.id}`,
-  status:       (b.status || 'confirmed').toLowerCase().replace(/[\s\-]/g, ''),
-  notes:        b.notes || b.note || b.remarks || '',
-  request_type: b.request_type || b.type || 'Standard',
+// const normalizeBooking = (b) => ({
+//   id:           b.id,
+//   booking_ref:  b.booking_ref || b.ref || b.reference || `BK${b.id}`,
+//   status:       (b.status || 'confirmed').toLowerCase().replace(/[\s\-]/g, ''),
+//   notes:        b.notes || b.note || b.remarks || '',
+//   request_type: b.request_type || b.type || 'Standard',
 
-  // Times — try common field names
-  start_time: b.start_time || b.start_at || b.startTime || b.from,
-  end_time:   b.end_time   || b.end_at   || b.endTime   || b.to,
+//   // Times — try common field names
+//   start_time: b.start_time || b.start_at || b.startTime || b.from,
+//   end_time:   b.end_time   || b.end_at   || b.endTime   || b.to,
 
-  // IDs
-  therapist_id: b.therapist_id || b.therapist?.id,
-  service_id:   b.service_id   || b.service?.id,
-  room_id:      b.room_id      || b.room?.id,
+//   // IDs
+//   therapist_id: b.therapist_id || b.therapist?.id,
+//   service_id:   b.service_id   || b.service?.id,
+//   room_id:      b.room_id      || b.room?.id,
 
-  // Nested objects — pass through if present, build minimal if not
-  therapist: b.therapist || { id: b.therapist_id, name: `Therapist ${b.therapist_id}`, gender: 'female' },
-  service:   b.service   || { id: b.service_id,   name: `Service ${b.service_id}`,     duration: 60, price: 80 },
-  room:      b.room      || { id: b.room_id,       name: `Room ${b.room_id}` },
-  client:    b.client    || b.customer || { name: b.client_name || b.customer_name || 'Guest', phone: b.phone || '' },
-});
+//   // Nested objects — pass through if present, build minimal if not
+//   therapist: b.therapist || { id: b.therapist_id, name: `Therapist ${b.therapist_id}`, gender: 'female' },
+//   service:   b.service   || { id: b.service_id,   name: `Service ${b.service_id}`,     duration: 60, price: 80 },
+//   room:      b.room      || { id: b.room_id,       name: `Room ${b.room_id}` },
+//   client:    b.client    || b.customer || { name: b.client_name || b.customer_name || 'Guest', phone: b.phone || '' },
+// });
 
 export default CalendarPage;

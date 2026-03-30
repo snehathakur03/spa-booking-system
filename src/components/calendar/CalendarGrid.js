@@ -1,11 +1,10 @@
 import React, { useCallback, useMemo, useRef, memo } from 'react';
 import { DndContext, DragOverlay, useDraggable, useDroppable, PointerSensor, useSensor, useSensors } from '@dnd-kit/core';
 import useStore from '../../store';
-import useFilteredBookings from '../../hooks/useFilteredBookings';
 import { getStatusStyle, getTherapistColor } from '../../utils/colorUtils';
 import {
   SLOT_HEIGHT, DAY_START_HOUR, DAY_END_HOUR, TOTAL_MINUTES,
-  topPosition, blockHeight, generateTimeSlots, formatTime, minsToTime, snapToSlot,
+  topPosition, blockHeight, generateTimeSlots, formatTime, snapToSlot,
 } from '../../utils/dateUtils';
 import ErrorBoundary from '../ui/ErrorBoundary';
 import NowLine from './NowLine';

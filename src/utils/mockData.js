@@ -1,4 +1,4 @@
-import { format, addMinutes, startOfDay } from 'date-fns';
+import { addMinutes, startOfDay } from 'date-fns';
 
 const SERVICES = [
   { id: 1, name: 'Swedish Massage', duration: 60, price: 80 },
